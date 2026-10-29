@@ -1,0 +1,20 @@
+{
+  "name": "Everyday hustle",
+  "short_name": "Hustle",
+  "description": "Routine notée, agenda et carnet de ronde. Fonctionne sans réseau.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#09070A",
+  "theme_color": "#09070A",
+  "icons": [
+    {
+      "src": "./icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
