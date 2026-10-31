@@ -426,7 +426,7 @@ const DEEP_CAP=240;
 
 function clone(o){return JSON.parse(JSON.stringify(o))}
 function defaultWake(){const w={};for(let i=0;i<7;i++)w[i]="06:00";return w}
-function defaultSettings(){return {v:3,tasks:clone(DEFAULT_TASKS),trashDays:[],trashTimes:{3:"18:45",5:"18:15"},lingeTime:"18:55",threshold:70,bilans:{},wake:defaultWake(),bedWeek:"22:30",travelFac:30,travelSalle:15,travelWork:2,deepGoal:12,fixed:clone(DEFAULT_FIXED),deadlines:[],updatedAt:0}}
+function defaultSettings(){return {v:3,tasks:clone(DEFAULT_TASKS),trashDays:[],trashTimes:{3:"18:45",5:"18:15"},lingeTime:"18:55",threshold:70,bilans:{},wake:defaultWake(),bedWeek:"22:30",travelFac:30,travelSalle:15,travelWork:2,deepGoal:12,fixed:clone(DEFAULT_FIXED),deadlines:[],issues:[],updatedAt:0}}
 
 /* Migration des réglages enregistrés avant l'agenda */
 function migrateTasks(tasks){
@@ -453,7 +453,7 @@ function normSettings(o){
   }
   if(!s.trashTimes)s.trashTimes=defaultSettings().trashTimes;
   if(!s.lingeTime)s.lingeTime="18:55";
-  for(const k of ["wake","fixed","deadlines"])if(!s[k])s[k]=defaultSettings()[k];
+  for(const k of ["wake","fixed","deadlines","issues"])if(!s[k])s[k]=defaultSettings()[k];
   for(const k of ["travelFac","travelSalle","travelWork"])if(s[k]==null)s[k]=defaultSettings()[k];
   delete s.travel;
   return {s,migrated};
@@ -647,7 +647,7 @@ async function pullRemote(migrate){
   }
   if(migrate)for(const k in S.days){if(!seen[k]&&S.days[k].updatedAt)dirty["d-"+k]=1}
   saveDirty();
-  if(changed){migrateDeadlines();saveLocal()}
+  if(changed){migrateDeadlines();migrateIssues();saveLocal()}
   lastSync=Date.now();
   if(changed&&!editing())render();
 }
@@ -674,6 +674,40 @@ function migrateDeadlines(){
   for(const k of keys){const f=S.days[k].fields||{};if(f.echeance){if(!f.echeanceDate||f.echeanceDate>=cur){if(!S.settings.deadlines.some(x=>x.title===f.echeance)){S.settings.deadlines.push({id:"dl-"+Date.now().toString(36),title:f.echeance,date:f.echeanceDate||""});added=true}}break}}
   S.settings.dlMigrated=true;
   if(added||keys.length)touchSettings();
+}
+
+/* ---------- Signalements du domaine ----------
+   Un signalement reste affiché jour après jour jusqu'à ce qu'il soit marqué « Réglé ». */
+function migrateIssues(){
+  if(S.settings.issuesMigrated)return;
+  const from=addDays(cur,-14);
+  Object.keys(S.days).filter(k=>k>=from&&k<=cur).sort().forEach(k=>{
+    const t=((S.days[k].fields||{}).signaler||"").trim();
+    if(t&&!S.settings.issues.some(x=>x.text===t))S.settings.issues.push({id:"is-"+k+"-"+Math.random().toString(36).slice(2,6),text:t,created:k,done:""});
+  });
+  S.settings.issuesMigrated=true;
+  touchSettings();
+}
+function openIssues(){return (S.settings.issues||[]).filter(x=>!x.done).sort((a,b)=>a.created<b.created?-1:1)}
+function ageTxt(k){const n=dayDiff(k,cur);return n<=0?"signalé aujourd'hui":n===1?"signalé hier":"signalé il y a "+n+" jours"}
+let confirmIssue=null;
+function issuesHTML(){
+  const open=openIssues();
+  const doneToday=(S.settings.issues||[]).filter(x=>x.done===cur);
+  let h=`<div class="field" id="signaler"><label for="is-new">À signaler${open.length?` <span class="badge" style="margin-left:6px">${open.length} en cours</span>`:""}</label>`;
+  if(open.length||doneToday.length){
+    h+=`<div class="dl">`;
+    for(const x of open){
+      const old=dayDiff(x.created,cur)>=7;
+      h+=`<div class="dlrow"><div><b>${esc(x.text)}</b><small style="${old?"color:var(--crimson);font-weight:700":""}">${ageTxt(x.created)}${old?" · à relancer":""}</small></div><span></span><button class="mini" data-isdone="${x.id}" style="padding:0 12px;color:var(--ok);border-color:var(--ok)">Réglé</button></div>`;
+    }
+    for(const x of doneToday){
+      h+=`<div class="dlrow" style="opacity:.7"><div><b style="text-decoration:line-through">${esc(x.text)}</b><small>réglé aujourd'hui</small></div><span></span><button class="mini" data-isundo="${x.id}" style="padding:0 12px">Rouvrir</button></div>`;
+    }
+    h+=`</div>`;
+  }
+  h+=`<div class="row"><input type="text" id="is-new" placeholder="Fuite, ampoule grillée, colis…"><button class="go" data-isadd="1" style="margin-left:0">Ajouter</button></div><span class="small muted">Reste affiché chaque jour jusqu'à ce que tu touches « Réglé ». Les signalements réglés sont gardés dans l'historique.</span></div>`;
+  return h;
 }
 
 /* ---------- Emploi du temps (.ics) ---------- */
@@ -1122,7 +1156,7 @@ function blockHTML(b,d,s){
     const g=ts.filter(t=>(t.section||"journee")===sid);if(!g.length)continue;
     html+=`<div class="sect">${sl}</div>`+g.map(t=>taskHTML(t,d)).join("");
   }
-  if(b.id==="domaine")html+=`<div class="field"><label for="f-signaler">À signaler</label><textarea id="f-signaler" data-field="signaler" rows="2" placeholder="Fuite, ampoule grillée, colis…">${esc(d.fields.signaler)}</textarea></div>`;
+  if(b.id==="domaine")html+=issuesHTML();
   else if(b.id==="taf")html+=deadlinesHTML();
   else if(b.id==="perso")html+=painHTML(d);
   return html+"</section>";
@@ -1376,7 +1410,9 @@ function dayDetail(k,d){
   if(d.pain!=null)extras.push(["Douleur aux pieds",d.pain+"/10"]);
   if(f.reve)extras.push(["Rêve",f.reve]);
   if(f.idee)extras.push(["Idée retenue",f.idee]);
-  if(f.signaler)extras.push(["À signaler",f.signaler]);
+  if(f.signaler&&!(S.settings.issues||[]).some(x=>x.text===f.signaler.trim()))extras.push(["À signaler",f.signaler]);
+  (S.settings.issues||[]).filter(x=>x.created===k).forEach(x=>extras.push(["Signalé",x.text+(x.done?" · réglé le "+fmtShort.format(parseKey(x.done)):" · en cours")]));
+  (S.settings.issues||[]).filter(x=>x.done===k&&x.created!==k).forEach(x=>extras.push(["Réglé",x.text+" · signalé le "+fmtShort.format(parseKey(x.created))]));
   if(f.symptomes)extras.push(["Symptômes",f.symptomes]);
   if(f.echeance)extras.push(["Échéance",f.echeance+(f.echeanceDate?" · "+fmtShort.format(parseKey(f.echeanceDate)):"")]);
   if(extras.length)h+=`<div class="kv">${extras.map(([a,b])=>`<span class="small muted">${a}</span><span style="text-align:right">${esc(b)}</span>`).join("")}</div>`;
@@ -1513,6 +1549,9 @@ document.addEventListener("click",e=>{
   if(ds.agset){const el=document.getElementById("mv-"+ds.agset);if(el&&el.value){planSet(agDay,ds.agset,{t:el.value});toast("Déplacé à "+el.value)}moving=null;render();return}
   if(ds.agrestore){const d=dayOf(ds.agrestore);Object.keys(d.plan).forEach(k=>{if(d.plan[k].s==="del"){delete d.plan[k].s;if(!Object.keys(d.plan[k]).length)delete d.plan[k]}});touchDay(ds.agrestore);render();return}
   // échéances
+  if(ds.isadd){const el=document.getElementById("is-new");const t=(el&&el.value||"").trim();if(!t){if(el)el.focus();toast("Décris ce qu'il faut signaler");return}S.settings.issues.push({id:"is-"+Date.now().toString(36),text:t.slice(0,300),created:cur,done:""});touchSettings();render();go("jour","signaler");toast("Signalement ajouté");return}
+  if(ds.isdone){const x=S.settings.issues.find(i=>i.id===ds.isdone);if(x){x.done=cur;touchSettings();render();go("jour","signaler");toast("Marqué comme réglé")}return}
+  if(ds.isundo){const x=S.settings.issues.find(i=>i.id===ds.isundo);if(x){x.done="";touchSettings();render();go("jour","signaler")}return}
   if(ds.dladd){const ti=document.getElementById("dl-title"),da=document.getElementById("dl-date");const title=(ti.value||"").trim();if(!title){ti.focus();toast("Donne un nom à l'échéance");return}S.settings.deadlines.push({id:"dl-"+Date.now().toString(36),title,date:da.value||""});touchSettings();render();go("jour","echeance");toast("Échéance ajoutée");return}
   if(ds.dlask){confirmDl=ds.dlask;render();go("jour","echeance");setTimeout(()=>{if(confirmDl===ds.dlask){confirmDl=null;if(view==="jour"&&!editing())render()}},4000);return}
   if(ds.dldel){S.settings.deadlines=S.settings.deadlines.filter(x=>x.id!==ds.dldel);confirmDl=null;touchSettings();render();return}
@@ -1565,6 +1604,7 @@ document.addEventListener("change",e=>{
 });
 document.addEventListener("keydown",e=>{
   if(e.key==="Enter"&&(e.target.id==="dl-title"||e.target.id==="dl-date")){e.preventDefault();const b=document.querySelector("[data-dladd]");if(b)b.click()}
+  if(e.key==="Enter"&&e.target.id==="is-new"){e.preventDefault();const b=document.querySelector("[data-isadd]");if(b)b.click()}
 });
 window.addEventListener("hashchange",()=>{const v=routeFromHash();if(v!==view){view=v;render();window.scrollTo(0,0)}});
 
@@ -1591,6 +1631,7 @@ document.addEventListener("visibilitychange",()=>{
 /* ---------- Démarrage ---------- */
 loadLocal();
 migrateDeadlines();
+migrateIssues();
 view=routeFromHash();
 render();
 initRemote();

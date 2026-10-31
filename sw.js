@@ -1,5 +1,5 @@
 // Everyday hustle · garde l'app sur le téléphone pour qu'elle s'ouvre sans réseau
-const CACHE="hustle-4f-2026-10-29-1";
+const CACHE="hustle-2026-10-30-1";
 const ASSETS=["./", "./index.html", "./manifest.webmanifest", "./icon.png"];
 self.addEventListener("install",e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));
