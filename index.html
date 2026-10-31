@@ -393,6 +393,7 @@ const DEFAULT_TASKS={
   perso:[
     {id:"p-lit",label:"Lit fait au réveil",detail:"La première victoire du jour",section:"matin"},
     {id:"p-reves",label:"Carnet des rêves",detail:"10 min au réveil, avant le téléphone",section:"matin",kind:"dream"},
+    {id:"p-creatine",label:"Créatine",detail:"Le matin, avec un grand verre d'eau · compte dans tes 2 L",section:"matin"},
     {id:"p-sante",label:"Suivi santé",detail:"Traitement pris si prescrit, symptômes notés",section:"matin",kind:"health"},
     {id:"p-eau",label:"1,5 à 2 L d'eau",detail:"Une gourde le matin, une l'après-midi",section:"journee"},
     {id:"p-prot",label:"Protéines à chaque repas",detail:"Viande, poisson, œufs, laitages, légumineuses",section:"journee"},
@@ -401,6 +402,7 @@ const DEFAULT_TASKS={
     {id:"p-linge",label:"Nettoyage linge",detail:"Lancer la machine avant la salle, étendre au retour",section:"soir",days:[3]},
     {id:"p-lecture",label:"Lecture / réflexion perso",detail:"25 min sans écran",section:"soir",kind:"reading"},
     {id:"p-pieds-dim",label:"Soin des pieds",detail:"Une fois par semaine : dimanche soir après le service, 15 min avant le coucher",section:"soir",days:[0]},
+    {id:"p-glycine",label:"Glycine",detail:"Environ 1 h avant le coucher",section:"soir"},
     {id:"p-coucher",label:"Coucher à heure fixe",detail:"7 à 9 h de sommeil",section:"soir"}
   ]
 };
@@ -426,7 +428,7 @@ const DEEP_CAP=240;
 
 function clone(o){return JSON.parse(JSON.stringify(o))}
 function defaultWake(){const w={};for(let i=0;i<7;i++)w[i]="06:00";return w}
-function defaultSettings(){return {v:3,tasks:clone(DEFAULT_TASKS),trashDays:[],trashTimes:{3:"18:45",5:"18:15"},lingeTime:"18:55",threshold:70,bilans:{},wake:defaultWake(),bedWeek:"22:30",travelFac:30,travelSalle:15,travelWork:2,deepGoal:12,fixed:clone(DEFAULT_FIXED),deadlines:[],issues:[],updatedAt:0}}
+function defaultSettings(){return {v:4,tasks:clone(DEFAULT_TASKS),trashDays:[],trashTimes:{3:"18:45",5:"18:15"},lingeTime:"18:55",threshold:70,bilans:{},wake:defaultWake(),bedWeek:"22:30",travelFac:30,travelSalle:15,travelWork:2,deepGoal:12,fixed:clone(DEFAULT_FIXED),deadlines:[],issues:[],updatedAt:0}}
 
 /* Migration des réglages enregistrés avant l'agenda */
 function migrateTasks(tasks){
@@ -450,6 +452,13 @@ function normSettings(o){
     if(!p.some(t=>t.id==="p-linge")){const j=p.findIndex(t=>t.id==="p-lecture");p.splice(j>=0?j:p.length,0,clone(DEFAULT_TASKS.perso.find(t=>t.id==="p-linge")))}
     const tr=(s.tasks.domaine||[]).find(t=>t.id==="d-bacs-out");if(tr&&tr.detail==="Demain, c'est la collecte")tr.detail="L'après-midi, avant le soir, pour les locataires";
     s.v=3;migrated=true;
+  }
+  if(o&&(s.v||1)<4){
+    const p=s.tasks.perso||(s.tasks.perso=[]);
+    const def=id=>clone(DEFAULT_TASKS.perso.find(t=>t.id===id));
+    if(!p.some(t=>t.id==="p-creatine")){let j=p.findIndex(t=>t.id==="p-reves");if(j<0)j=p.findIndex(t=>t.id==="p-lit");p.splice(j+1,0,def("p-creatine"))}
+    if(!p.some(t=>t.id==="p-glycine")){const j=p.findIndex(t=>t.id==="p-coucher");p.splice(j>=0?j:p.length,0,def("p-glycine"))}
+    s.v=4;migrated=true;
   }
   if(!s.trashTimes)s.trashTimes=defaultSettings().trashTimes;
   if(!s.lingeTime)s.lingeTime="18:55";
@@ -856,7 +865,9 @@ function proposals(k,fixed,dow){
   add("reveil",wake,10,"Réveil · lit fait · carnet des rêves","perso","routine","10 min, avant le téléphone");
   if(!we)add("eau",wake+10,5,"Verre d'eau · intention du matin","perso","routine","Quel bien vais-je faire aujourd'hui ?");
   add("ronde",wake+15,20,"Ronde du domaine","domaine","routine","Extérieur, communs, garage, apparts, voiture");
-  add("pdj",wake+40,20,we?"Petit-déjeuner protéiné":"Petit-déjeuner protéiné · point avec le petit cousin",we?"perso":"domaine");
+  const hasT=id=>(st.tasks.perso||[]).some(t=>t.id===id&&(!t.days||t.days.includes(dow)));
+  const crea=hasT("p-creatine")?" · créatine":"";
+  add("pdj",wake+40,20,(we?"Petit-déjeuner protéiné":"Petit-déjeuner protéiné · point avec le petit cousin")+crea,we?"perso":"domaine","routine",crea?"Créatine avec un grand verre d'eau":"");
   const dl=deepTarget(k);
   add("deep1",wake+60,90,"Travail profond"+(dl?" · "+dl.title:""),"taf","deep",dl?`Échéance la plus proche · phase ${dl.ph} · ${whenTxt(dl.n)}`:"Ta tâche la plus exigeante · ajoute tes échéances pour la cibler");
   if(wd){
@@ -949,6 +960,15 @@ function buildPlan(k){
     const away=fixed.find(h=>(h.kind==="cours"||(h.kind==="trajet"&&/fac/i.test(h.sub)))&&overlap(c,h));
     if(away)notes.push({t:c.title+" à "+hm(c.start),s:"Tu seras "+(away.kind==="cours"?"en cours":"en trajet pour la fac")+" à cette heure-là : fais-le avant de partir.",warn:true});
     accepted.push(c);
+  }
+  // glycine environ 1 h avant le coucher, décalée après un trajet, la salle ou un service
+  if((st.tasks.perso||[]).some(t=>t.id==="p-glycine"&&(!t.days||t.days.includes(dow)))){
+    const bedItem=accepted.find(p=>p.key==="p-coucher");
+    const bedPlan=(S.days[k]&&S.days[k].plan&&S.days[k].plan["p-coucher"]&&S.days[k].plan["p-coucher"].t)?toMin(S.days[k].plan["p-coucher"].t):(bedItem?bedItem.start:bedOf(k));
+    let g=bedPlan-60;
+    for(let n=0;n<4;n++){const busy=fixed.find(f=>f.dur>0&&g>=f.start&&g<f.start+f.dur);if(!busy)break;g=busy.start+busy.dur}
+    const before=bedPlan-g;
+    accepted.push({key:"p-glycine",start:g,dur:5,title:"Glycine",sub:before>=55?"1 h avant le coucher":"Au retour, "+before+" min avant le coucher",cat:"perso",kind:"routine",fixed:false});
   }
   // sieste si la nuit précédente fait moins de 7 h (placée avant le remplissage des créneaux)
   const prevNight=nightBefore(k);
