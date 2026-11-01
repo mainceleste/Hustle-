@@ -344,7 +344,7 @@ mark{background:color-mix(in srgb,var(--gold) 35%,transparent)}
 :focus-visible{outline-color:var(--gold)}
 .ph-INTENSIF{background:var(--crimson);color:#FFF4F0}
 .tabs{background:color-mix(in srgb,var(--bg) 88%,transparent);border-top-color:color-mix(in srgb,var(--gold) 35%,transparent)}
-.tabs button[aria-current="page"]{color:var(--gold);background:color-mix(in srgb,var(--bordeaux) 55%,transparent)}
+.tabs button[aria-current="page"]{color:#F4E2A6;background:linear-gradient(160deg,var(--bordeaux-2),var(--bordeaux))}
 .toast{background:linear-gradient(160deg,var(--bordeaux-2),var(--bordeaux));color:#F6EBD6;border:1px solid var(--gold-lo)}
 input[type=text],input[type=date],input[type=time],input[type=number],input[type=search],textarea,select{border-color:var(--line)}
 input:focus,textarea:focus,select:focus{border-color:var(--gold);outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 30%,transparent)}
@@ -459,7 +459,7 @@ const DEFAULT_FIXED=[
 ];
 const FIXED_TYPES=[["service","Service"],["salle","Salle"],["autre","Autre"]];
 const GYM_PLAN={1:"Bas du corps",2:"Haut du corps",3:"Cardio",4:"Haut du corps"};
-const SEANCES=["Repos","Haut du corps","Bas du corps","Full body","Cardio","Maison"];
+const SEANCES=["Repos","Haut du corps","Bas du corps","Full body","Cardio","Maison","Allégée"];
 const DOWS=["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"];
 const DOW_ORDER=[1,2,3,4,5,6,0];
 const LS_KEY="carnet-ronde-v1", LS_POMO="carnet-ronde-pomo";
@@ -468,7 +468,7 @@ const DEEP_CAP=240;
 
 function clone(o){return JSON.parse(JSON.stringify(o))}
 function defaultWake(){const w={};for(let i=0;i<7;i++)w[i]="06:00";return w}
-function defaultSettings(){return {v:4,tasks:clone(DEFAULT_TASKS),trashDays:[],trashTimes:{3:"18:45",5:"18:15"},lingeTime:"18:55",threshold:70,bilans:{},wake:defaultWake(),bedWeek:"22:30",travelFac:30,travelSalle:15,travelWork:2,deepGoal:12,fixed:clone(DEFAULT_FIXED),deadlines:[],issues:[],updatedAt:0}}
+function defaultSettings(){return {v:4,tasks:clone(DEFAULT_TASKS),trashDays:[],trashTimes:{3:"18:45",5:"18:15"},lingeTime:"18:55",threshold:70,bilans:{},wake:defaultWake(),bedWeek:"22:30",travelFac:30,travelSalle:15,travelWork:2,deepGoal:12,fixed:clone(DEFAULT_FIXED),deadlines:[],issues:[],scenarios:defaultScenarios(),updatedAt:0}}
 
 /* Migration des réglages enregistrés avant l'agenda */
 function migrateTasks(tasks){
@@ -504,6 +504,7 @@ function normSettings(o){
   if(!s.lingeTime)s.lingeTime="18:55";
   for(const k of ["wake","fixed","deadlines","issues"])if(!s[k])s[k]=defaultSettings()[k];
   if(!Array.isArray(s.scenarios)||!s.scenarios.length)s.scenarios=defaultScenarios();
+  else defaultScenarios().forEach(d=>{if(!s.scenarios.some(x=>x.id===d.id))s.scenarios.push(d)});
   for(const k of ["travelFac","travelSalle","travelWork"])if(s[k]==null)s[k]=defaultSettings()[k];
   delete s.travel;
   return {s,migrated};
@@ -544,7 +545,8 @@ function dayOf(k){if(!S.days[k])S.days[k]=emptyDay(k);const d=S.days[k];if(!d.pl
 function visibleTasks(blockId,k){
   const td=S.settings.trashDays||[];
   const dow=dowOf(k),tomorrow=(dow+1)%7;
-  return (S.settings.tasks[blockId]||[]).filter(t=>{
+  const xt=((S.days[k]&&S.days[k].xtasks)||[]).filter(t=>t.block===blockId);
+  return (S.settings.tasks[blockId]||[]).concat(xt).filter(t=>{
     if(t.days&&!t.days.includes(dow))return false;
     if(t.kind==="trash-in")return td.includes(dow);
     if(t.kind==="trash-out")return td.includes(tomorrow);
@@ -870,16 +872,16 @@ function coursesOn(k){
 }
 
 /* ---------- Échéances ---------- */
-function phaseOf(from,date){
+function phaseOf(from,date,serre){
   const n=dayDiff(from,date);
   if(n<0)return {n,ph:"PASSÉE"};
-  if(n<=7)return {n,ph:"INTENSIF"};
+  if(n<=(serre?14:7))return {n,ph:"INTENSIF"};
   if(n<=21)return {n,ph:"FOND"};
   return {n,ph:"AMORCE"};
 }
 function whenTxt(n){return n<0?"date passée":n===0?"aujourd'hui":n===1?"demain":"J-"+n}
 function deepTarget(k){
-  const list=(S.settings.deadlines||[]).filter(d=>d.date&&d.date>=k).map(d=>Object.assign({},d,phaseOf(k,d.date))).filter(d=>d.ph==="INTENSIF"||d.ph==="FOND").sort((a,b)=>a.date<b.date?-1:1);
+  const list=(S.settings.deadlines||[]).filter(d=>d.date&&d.date>=k).map(d=>Object.assign({},d,phaseOf(k,d.date,d.serre))).filter(d=>d.ph==="INTENSIF"||d.ph==="FOND").sort((a,b)=>a.date<b.date?-1:1);
   return list[0]||null;
 }
 
@@ -1088,6 +1090,7 @@ function buildPlan(k){
   const all=[...items,...accepted].map(it=>{
     const o=plan0[it.key]||{};const x=Object.assign({},it);
     x.anchor=(x.fixed&&x.kind!=="placeholder")||x.key==="p-reveil";
+    if(d0&&d0.flags&&d0.flags.assis&&x.kind==="revision")x.sub="Assis : relis et explique à voix haute, sans marcher";
     if(!x.fixed&&!x._ov&&(!x.anchor||o.ank)){if(o.t)x.start=toMin(o.t);if(o.d!=null)x.dur=+o.d}
     x.status=o.s||"";return x;
   });
@@ -1140,11 +1143,11 @@ const ICON={
 };
 
 /* ---------- Navigation ---------- */
-const VIEWS=[["jour","Aujourd'hui","today"],["agenda","Agenda","agenda"],["assistant","Assistant","assist"],["bilan","Bilan","bilan"],["plus","Plus","plus"]];
+const VIEWS=[["jour","Aujourd'hui","today"],["agenda","Agenda","agenda"],["jke","Jke","assist"],["bilan","Bilan","bilan"],["plus","Plus","plus"]];
 const PLUS_SUB=["semaine","historique","reves","edt","inspirations","reglages"];
-const ALL_VIEWS=["jour","agenda","assistant","bilan","plus",...PLUS_SUB];
+const ALL_VIEWS=["jour","agenda","jke","bilan","plus",...PLUS_SUB];
 let view="jour";
-function routeFromHash(){const h=(location.hash||"").slice(1);return ALL_VIEWS.includes(h)?h:"jour"}
+function routeFromHash(){let h=(location.hash||"").slice(1);if(h==="assistant"){h="jke";try{history.replaceState(null,"","#jke")}catch(e){}}return ALL_VIEWS.includes(h)?h:"jour"}
 function go(v,anchor){
   if(location.hash.slice(1)!==v){try{history.replaceState(null,"","#"+v)}catch(e){location.hash=v}}
   view=v;render();
@@ -1227,7 +1230,7 @@ function deadlinesHTML(){
   const list=(S.settings.deadlines||[]).slice().sort((a,b)=>(a.date||"9")<(b.date||"9")?-1:1);
   let h=`<div class="field" id="echeance"><label for="dl-title">Échéances</label><div class="dl">`;
   for(const x of list){
-    const p=x.date?phaseOf(cur,x.date):null;
+    const p=x.date?phaseOf(cur,x.date,x.serre):null;
     h+=`<div class="dlrow"><div><b>${esc(x.title)}</b><small>${x.date?fmtShort.format(parseKey(x.date))+" · "+whenTxt(p.n):"sans date"}</small></div>${p?`<span class="ph-chip ph-${p.ph}">${p.ph}</span>`:"<span></span>"}${confirmDl===x.id?`<button class="mini confirm" data-dldel="${x.id}">Retirer</button>`:`<button class="mini danger" data-dlask="${x.id}" aria-label="Retirer l'échéance">✕</button>`}</div>`;
   }
   h+=`</div><div class="row"><input type="text" id="dl-title" placeholder="Ex. : Étude littéraire TD 4"><input type="date" id="dl-date" aria-label="Date de l'échéance"><button class="go" data-dladd="1" style="margin-left:0">Ajouter</button></div><span class="small muted">INTENSIF à 7 jours ou moins, FOND de 8 à 21 jours, AMORCE au-delà. Le travail profond de 07:00 vise la plus proche en FOND ou INTENSIF.</span></div>`;
@@ -1536,7 +1539,7 @@ const INSP=[
   {who:"LeBron James",t:"La récupération fait partie de l'entraînement",p:"Le basketteur investit beaucoup dans le sommeil et les soins, avec des nuits longues et régulières. Récupérer n'est pas une pause dans le travail, c'est ce qui le rend possible. Même logique pour tes pieds.",to:["jour","douleur"],l:"Perso · Coucher et douleur",c:"perso"},
   {who:"Benjamin Franklin",t:"Les deux questions",p:"Dans son autobiographie, son emploi du temps s'ouvre sur « Quel bien ferai-je aujourd'hui ? » et se ferme sur « Quel bien ai-je fait aujourd'hui ? ». L'app te pose la première le matin, la seconde le soir.",to:["jour"],l:"En-tête de l'écran Aujourd'hui",c:"taf"},
   {who:"James Clear",t:"Accrocher les habitudes",p:"Dans Atomic Habits, il propose de greffer une nouvelle habitude sur une habitude existante : « Après X, je fais Y. » C'est pour ça que tes tâches sont rangées Matin, Journée, Soir : chacune s'accroche à la précédente.",to:["reglages"],l:"Réglages · ordre des tâches",c:"dom"},
-  {who:"Peter Gollwitzer",t:"Si… alors…",p:"Ce psychologue a montré que les « intentions de mise en œuvre » (« si telle situation arrive, alors je fais ceci ») augmentent nettement les chances de passer à l'action. Le plan B est décidé à froid, pas dans le stress du moment.",to:["assistant","imprevus"],l:"Assistant · Imprévus",c:"taf"},
+  {who:"Peter Gollwitzer",t:"Si… alors…",p:"Ce psychologue a montré que les « intentions de mise en œuvre » (« si telle situation arrive, alors je fais ceci ») augmentent nettement les chances de passer à l'action. Le plan B est décidé à froid, pas dans le stress du moment.",to:["jke","imprevus"],l:"Jke · Imprévus",c:"taf"},
   {who:"James Clear",t:"Ne jamais rater deux fois",p:"Dans Atomic Habits : rater une fois est un accident, rater deux fois est le début d'une nouvelle habitude. Un bloc raté est replacé le jour même, et s'il est raté deux jours de suite il passe en priorité haute.",to:["jour","rattrapage"],l:"Aujourd'hui · Rattrapage",c:"dom"},
   {who:"Sport de haut niveau",t:"Le score de récupération",p:"Beaucoup d'athlètes commencent la journée par un score de forme (sommeil, fatigue, douleurs) et ajustent la charge en conséquence. Ton check-in fait pareil : vert, on déroule ; rouge, on allège sans culpabiliser.",to:["jour","checkin"],l:"Perso · Check-in du matin",c:"perso"},
   {who:"John Boyd",t:"La boucle OODA",p:"Ce stratège de l'US Air Force décrit la décision en quatre temps : observer, s'orienter, décider, agir. Celui qui boucle le cycle le plus vite garde l'initiative. Ton débrief du soir reprend les trois premiers temps ; demain matin, tu agis.",to:["jour","debrief"],l:"Aujourd'hui · Débrief du soir",c:"taf"},
@@ -1563,7 +1566,7 @@ function renderSettings(){
   });
   html+=`<button class="addbtn" data-fxadd="1">+ Ajouter un événement fixe</button></div></div>`;
   html+=`<div class="card"><h2>Poubelles</h2><p class="small muted" style="margin:0">Jours de collecte. « Sortir les poubelles » apparaît la veille, à l'heure choisie ci-dessous, « Rentrer les bacs » le matin du jour J.</p><div class="days7">${DOW_ORDER.map(d=>`<button class="chip" data-trash="${d}" aria-pressed="${(st.trashDays||[]).includes(d)}" style="--c:var(--dom)">${DOWS[d]}</button>`).join("")}</div>${(st.trashDays||[]).length?`<div class="wakegrid">${(st.trashDays||[]).map(d=>(d+6)%7).sort((a,b)=>((a+6)%7)-((b+6)%7)).map(o=>`<label for="tt-${o}">Sortie ${DOWS[o].toLowerCase()}.<input type="time" id="tt-${o}" data-trashtime="${o}" value="${esc((st.trashTimes||{})[o]||"18:30")}"></label>`).join("")}</div>`:""}<label class="flabel" for="set-linge">Heure du linge (jours choisis dans la tâche « Nettoyage linge »)</label><input type="time" id="set-linge" value="${esc(st.lingeTime||"18:55")}" style="max-width:160px"></div>`;
-  html+=`<div class="card" id="reg-imprevus"><h2>Imprévus</h2><p class="small muted" style="margin:0">Les plans B de l'onglet Assistant. Nom et description modifiables ; pour les scénarios légers, choisis les effets.</p><div class="slist">`;
+  html+=`<div class="card" id="reg-imprevus"><h2>Imprévus</h2><p class="small muted" style="margin:0">Les plans B de l'onglet Jke. Nom et description modifiables ; pour les scénarios légers, choisis les effets.</p><div class="slist">`;
   st.scenarios.forEach(sc=>{
     const e=sc.effets||{};
     html+=`<div class="sitem"><input type="text" id="sc-n-${esc(sc.id)}" data-scn="nom" data-id="${esc(sc.id)}" value="${esc(sc.nom)}" aria-label="Nom du scénario"><input type="text" id="sc-t-${esc(sc.id)}" data-scn="texte" data-id="${esc(sc.id)}" value="${esc(sc.texte)}" aria-label="Plan B">`;
@@ -1702,8 +1705,9 @@ function evaluateOps(ops,confirmed){
     if(o.t==="deadline"){
       if(!o.titre||!/^\d{4}-\d{2}-\d{2}$/.test(o.date)){row.status="rejected";row.reason="Titre ou date manquant";row.desc="Échéance "+(o.titre||"");return}
       if(!st.deadlines)st.deadlines=clone(S.settings.deadlines||[]);
-      st.deadlines.push({id:"dl-"+Date.now().toString(36)+idx,title:o.titre,date:o.date});
-      row.desc="Nouvelle échéance : "+o.titre+" · "+fmtShort.format(parseKey(o.date));return;
+      const dl={id:"dl-"+Date.now().toString(36)+idx,title:o.titre,date:o.date};if(o.serre)dl.serre=true;
+      st.deadlines.push(dl);
+      row.desc="Nouvelle échéance : "+o.titre+" · "+fmtShort.format(parseKey(o.date))+(o.serre?" · rétroplanning resserré":"");return;
     }
     const k=o.jour;
     if(k<addDays(cur,-1)||k>addDays(cur,13)){row.status="rejected";row.reason="Jour hors de la période";row.desc=k;return}
@@ -1712,8 +1716,14 @@ function evaluateOps(ops,confirmed){
     const d=dayIn(st,k);
     const dayLbl=k===cur?"":" · "+dowShort(k)+" "+parseKey(k).getDate();
     if(o.t==="dayset"){
-      d.flags=Object.assign({},d.flags||{});if(o.seuil)d.flags.seuil=+o.seuil;if(o.seance)d.flags.seance=o.seance;
-      row.desc=[o.seuil?"Journée validée dès "+o.seuil+"/100":"",o.seance?"Salle : "+o.seance:""].filter(Boolean).join(" · ")+dayLbl;mark(k,"__flags");return;
+      d.flags=Object.assign({},d.flags||{});if(o.seuil)d.flags.seuil=+o.seuil;if(o.seance)d.flags.seance=o.seance;if(o.assis)d.flags.assis=true;
+      if(o.douleur!=null)d.pain=+o.douleur;
+      row.desc=[o.douleur!=null?"Douleur aux pieds : "+o.douleur+"/10":"",o.seuil?"Journée validée dès "+o.seuil+"/100":"",o.seance?"Salle : "+o.seance:"",o.assis?"Révisions assises":""].filter(Boolean).join(" · ")+dayLbl;mark(k,"__flags");return;
+    }
+    if(o.t==="task"){
+      if(!o.titre){rollback();row.status="rejected";row.reason="Tâche sans nom";return}
+      d.xtasks=(d.xtasks||[]).concat({id:"xt-"+Date.now().toString(36)+idx,label:o.titre,detail:o.sub||"Ajoutée par Jke, pour aujourd'hui",section:"journee",block:o.bloc||"domaine"});
+      row.desc="Tâche "+(BLOCKS.find(b=>b.id===(o.bloc||"domaine"))||{name:""}).name+" : "+o.titre+dayLbl;mark(k,"__tasks");return;
     }
     let targetKey=null;
     if(o.t==="add"||o.t==="addanchor"){
@@ -1757,7 +1767,7 @@ function evaluateOps(ops,confirmed){
 let pending=null;
 function openPreview(label,src,ops,opts){
   opts=opts||{};
-  pending={label,src,reply:opts.reply||"",ops:ops.map(o=>o.t==="unknown"?o:fillOp(o)),confirmed:new Set(opts.preconf||[]),after:opts.after||null};
+  pending={label,src,reply:opts.reply||"",ops:ops.map(o=>o.t==="unknown"?o:fillOp(o)),confirmed:new Set(opts.preconf||[]),after:opts.after||null,then:opts.then||null};
   pending.res=evaluateOps(pending.ops,pending.confirmed);
 }
 function friseHTML(items,hl){
@@ -1791,7 +1801,7 @@ function applyPending(){
   if(res.st.deadlines){S.settings.deadlines=res.st.deadlines;touchSettings()}
   record(p.label,snap,p.src);
   if(p.after)p.after();
-  pending=null;render();toast(ok+" modification"+(ok>1?"s":"")+" appliquée"+(ok>1?"s":"")+" · annulable dans le journal");
+  pending=null;render();if(p.then)setTimeout(p.then,60);toast(ok+" modification"+(ok>1?"s":"")+" appliquée"+(ok>1?"s":"")+" · annulable dans le journal");
 }
 function applyDirect(label,src,ops){
   const o=ops.map(fillOp);const res=evaluateOps(o,new Set());
@@ -1834,7 +1844,7 @@ function rattrapageHTML(){
     if(at==null&&dur>25&&i.kind!=="deep"){dur=25;at=freeSlot(cur,25,n,21*60+30,i.kind)}
     return {i,two,at,dur};
   }).sort((a,b)=>(b.two-a.two)||(a.i.start-b.i.start));
-  return `<div class="card" id="rattrapage"><div class="eyebrow">Rattrapage · ne jamais rater deux fois</div><div class="rt">${rows.map(r=>`<div class="rtrow"><div class="agh"><i class="dot ${r.i.cat==="neutral"?"":r.i.cat}"></i><span>${esc(r.i.title)}</span>${r.two?`<span class="agbadge prio">Priorité haute</span>`:""}</div><small class="muted">Prévu à ${hm(r.i.start)}, pas validé${r.two?" · déjà raté hier":""}</small><div class="agact">${r.at!=null?`<button class="v" data-rtk="${esc(r.i.key)}" data-rtt="${hm(r.at)}" data-rtd="${r.dur}">Replacer à ${hm(r.at)}${r.dur!==r.i.dur?" ("+durTxt(r.dur)+")":""}</button>`:`<span class="small muted">Plus de créneau libre avant 21:30</span>`}<button data-rtdone="${esc(r.i.key)}">C'était fait</button><button data-rtskip="${esc(r.i.key)}">Laisser tomber</button></div></div>`).join("")}</div></div>`;
+  return `<div class="card" id="rattrapage"><div class="eyebrow">Rattrapage · ne jamais rater deux fois</div><div class="rt">${rows.map(r=>`<div class="rtrow"><div class="agh"><i class="dot ${r.i.cat==="neutral"?"":r.i.cat}"></i><span>${esc(r.i.title)}</span>${r.two?`<span class="agbadge prio">Priorité haute</span>`:""}</div><small class="muted">Prévu à ${hm(r.i.start)}, pas validé${r.two?" · déjà raté hier":""}</small><div class="agact">${r.at!=null?`<button class="v" data-rtk="${esc(r.i.key)}" data-rtt="${hm(r.at)}" data-rtd="${r.dur}">Replacer à ${hm(r.at)}${r.dur!==r.i.dur?" ("+durTxt(r.dur)+")":""}</button>`:`<span class="small muted">${r.i.start>=21*60+30?"Trop tard pour le replacer aujourd'hui":"Plus de créneau libre avant 21:30"}</span>`}<button data-rtdone="${esc(r.i.key)}">C'était fait</button><button data-rtskip="${esc(r.i.key)}">Laisser tomber</button></div></div>`).join("")}</div></div>`;
 }
 
 /* Claude intégré (capacité sample) */
@@ -1846,11 +1856,11 @@ async function getSample(){
   return sampleFn;
 }
 function sampleReady(){return !STANDALONE&&sampleFn!==null&&!sampleOff}
-function sampleOffMsg(){return STANDALONE?"L'assistant Claude ne marche que dans la version claude.ai de l'app. Ici, les imprévus, le check-in, le rattrapage et le journal fonctionnent sans réseau.":(sampleOff||"Claude n'est pas disponible ici. Les imprévus, le check-in, le rattrapage et le journal marchent quand même.")}
+function sampleOffMsg(){return STANDALONE?"Jke ne comprend la voix que dans la version claude.ai de l'app. Ici, les imprévus, le check-in, le rattrapage et le journal fonctionnent sans réseau.":(sampleOff||"Jke ne peut pas joindre Claude ici. Les imprévus, le check-in, le rattrapage et le journal marchent quand même.")}
 function sampleErr(e){
   const c=e&&e.code;
   if(c==="cancelled")return "";
-  if(["not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed"].includes(c)){sampleOff="Claude n'est pas autorisé pour cette page. Les imprévus, le check-in, le rattrapage et le journal marchent quand même.";return sampleOff}
+  if(["not_granted","sampling_disabled","not_declared","capability_disabled","capability_removed"].includes(c)){sampleOff="Claude n'est pas autorisé pour Jke sur cette page. Les imprévus, le check-in, le rattrapage et le journal marchent quand même.";return sampleOff}
   if(c==="rate_limited")return "Trop de demandes pour l'instant. Réessaie dans quelques minutes.";
   if(c==="session_expired")return "Reconnecte-toi à Claude, puis réessaie.";
   if(c==="invalid_json")return "Réponse illisible. Reformule ta demande ou réessaie.";
@@ -1871,7 +1881,7 @@ function stateForClaude(){
     signalements:openIssues().map(x=>x.text),decision_hier:((S.days[addDays(cur,-1)]||{}).debrief||{}).dec||"",jours};
 }
 function assistantPrompt(text){
-  return `Tu es l'assistant de planning personnel de J. : étudiant en L3 Lettres modernes, chef de rang dans un restaurant, il gère seul une propriété familiale. Tu le tutoies, tu es bref et concret.
+  return `Tu es Jke, l'assistant de planning personnel de J. : étudiant en L3 Lettres modernes, chef de rang dans un restaurant, il gère seul une propriété familiale. Tu le tutoies, tu es bref et concret.
 
 ${RULES_TXT}
 
@@ -1892,7 +1902,7 @@ Opérations possibles (utilise les "id" fournis ; heures "HH:MM" ; durées en mi
 {"op":"echeance","titre":"…","date":"AAAA-MM-JJ"}
 Pour une simple question, "operations" est une liste vide. Ne propose que des opérations qui respectent les règles.`;
 }
-let AS={text:"",busy:false,answer:"",err:"",ctl:null,scen:null,svcS:"18:30",svcE:"22:45"};
+let AS={text:"",busy:false,answer:"",err:"",ctl:null,scen:null,svcS:"18:30",svcE:"22:45",debFin:"23:30",ecTitre:"",ecDate:"",maisonUse:"deep",libreDur:60};
 async function askAssistant(){
   const box=document.getElementById("as-input");const text=((box&&box.value)||AS.text||"").trim();
   if(!text){toast("Dicte ou écris ta demande");if(box)box.focus();return}
@@ -1907,9 +1917,9 @@ async function askAssistant(){
     const ops=raw.slice(0,20).map(normOp).filter(Boolean);
     AS.answer=[reply,...ops.filter(o=>o.t==="reply").map(o=>o.texte)].filter(Boolean).join("\n");
     const real=ops.filter(o=>o.t!=="reply");
-    if(real.length)openPreview("« "+text.slice(0,60)+(text.length>60?"…":"")+" »","assistant",real);
+    if(real.length)openPreview("« "+text.slice(0,60)+(text.length>60?"…":"")+" »","jke",real);
   }catch(e){AS.err=sampleErr(e)}
-  finally{AS.busy=false;AS.ctl=null;if(view==="assistant"&&pending)go("assistant","apercu");else render()}
+  finally{AS.busy=false;AS.ctl=null;if(view==="jke"&&pending)go("jke","apercu");else render()}
 }
 
 /* Imprévus : intentions « si… alors… » */
@@ -1918,8 +1928,17 @@ function defaultScenarios(){return [
   {id:"cours",nom:"Cours annulé",type:"cours",texte:"Le créneau du cours devient du travail profond sur l'échéance la plus proche."},
   {id:"service",nom:"Service en plus",type:"service",texte:"Le service devient une ancre. Les blocs qui le chevauchent sont retirés, et pas de travail profond dans l'heure qui suit."},
   {id:"cousin",nom:"Cousin malade",type:"leger",texte:"Travail profond réduit à 45 min, 30 min pour t'occuper de lui, journée validée dès 60.",effets:{deep45:true,sieste:false,seuil60:true,seance:"",bloc:"S'occuper du petit cousin",blocDuree:30}},
-  {id:"crevee",nom:"Journée crevée",type:"leger",texte:"Travail profond réduit à 45 min, sieste de 20 min, salle en haut du corps, journée validée dès 60.",effets:{deep45:true,sieste:true,seuil60:true,seance:"Haut du corps",bloc:"",blocDuree:0}}
+  {id:"crevee",nom:"Journée crevée",type:"leger",texte:"Travail profond réduit à 45 min, sieste de 20 min, salle en haut du corps, journée validée dès 60.",effets:{deep45:true,sieste:true,seuil60:true,seance:"Haut du corps",bloc:"",blocDuree:0}},
+  {id:"deborde",nom:"Service qui déborde",type:"deborde",texte:"Fin de service après 23:00 : demain, réveil 6:00 maintenu, travail profond réduit à 45 min, sieste de 20 min ajoutée, séance de salle allégée."},
+  {id:"domaine",nom:"Problème au domaine",type:"domaine",texte:"1 h bloquée maintenant, le bloc mobile suivant est décalé, la tâche « Appeler un artisan » s'ajoute au Domaine et le champ « À signaler » s'ouvre."},
+  {id:"pieds",nom:"Pieds en vrac",type:"pieds",texte:"Douleur réglée à 7 : salle en haut du corps assis (ou repos), révisions assises, soin des pieds exceptionnel ce soir."},
+  {id:"echeance",nom:"Échéance surprise",type:"echeance",texte:"Tu crées l'échéance ; à moins de 21 jours, le rétroplanning se resserre et le premier bloc est posé demain à 7:00."},
+  {id:"maison",nom:"Séance maison",type:"maison",texte:"La salle devient 45 min à la maison avec la barre EZ, et le temps gagné sert au travail profond ou à la lecture."},
+  {id:"libre",nom:"Créneau libre",type:"libre",texte:"Tu donnes la durée : Jke la remplit avec l'échéance la plus proche, ou une sieste si ta forme est rouge."}
 ]}
+function nearestDeadline(k){return (S.settings.deadlines||[]).filter(x=>x.date&&x.date>=k).sort((a,b)=>a.date<b.date?-1:1)[0]||null}
+function deepUsedOn(k){return buildPlan(k).items.filter(i=>i.kind==="deep"&&i.status!=="del").reduce((s,i)=>s+i.dur,0)}
+function deepOkAt(k,start,dur){const items=buildPlan(k).items;return start+dur<=21*60+30&&!items.some(x=>x.kind==="service"&&x.status!=="del"&&start>=x.start+x.dur&&start<x.start+x.dur+60)&&deepUsedOn(k)+dur<=DEEP_CAP}
 function deepLeftToday(){return buildPlan(cur).items.filter(i=>i.kind==="deep"&&i.status!=="del"&&i.status!=="done"&&i.start+i.dur>nowMin())}
 function lightOps(e){
   const ops=[],n=nowMin();
@@ -1930,8 +1949,88 @@ function lightOps(e){
   return ops;
 }
 function scenarioOps(sc,arg){
-  const ops=[],pre=[],n=nowMin(),items=buildPlan(cur).items;
+  const ops=[],pre=[],n=nowMin(),items=buildPlan(cur).items;let reply="",then=null;
+  const R=()=>({ops,pre,reply,then});
   if(sc.type==="leger")return {ops:lightOps(sc.effets||{}),pre};
+  if(sc.type==="deborde"){
+    const fin=toMin(arg&&arg.fin||"23:30"),tm=addDays(cur,1);
+    const bed=Math.min(fin+30,23*60+55);
+    if(fin+30<=23*60+55&&fin+30>bedOf(cur))ops.push({t:"move",id:"p-coucher",debut:hm(bed)});
+    buildPlan(tm).items.filter(i=>i.kind==="deep"&&i.status!=="del"&&i.dur>45).forEach(i=>ops.push({t:"shorten",jour:tm,id:i.key,duree:45}));
+    const tmItems=buildPlan(tm).items.filter(i=>i.dur>0&&i.status!=="del"&&i.kind!=="placeholder"&&!i.key.startsWith("g-"));
+    let at=null;for(let t=12*60+30;t+20<=18*60;t+=5){const c={start:t,dur:20};if(!tmItems.some(b=>overlap(c,b))){at=t;break}}
+    if(at!=null)ops.push({t:"add",jour:tm,debut:hm(at),duree:20,titre:"Sieste de 20 min",type:"sieste"});
+    if(hasSalle(tm))ops.push({t:"dayset",jour:tm,seance:"Allégée"});
+    reply="Réveil maintenu à "+hm(wakeOf(tm))+" demain : nuit d'environ "+durTxt(wakeOf(tm)+1440-Math.max(fin+30,bedOf(cur)))+". La journée de demain est allégée en conséquence.";
+    return R();
+  }
+  if(sc.type==="domaine"){
+    const s0=Math.ceil(n/5)*5,blk={start:s0,dur:60};
+    ops.push({t:"add",debut:hm(s0),duree:60,titre:"Problème au domaine",type:"autre",sub:"1 h bloquée pour gérer l'urgence"});
+    const nxt=items.filter(i=>isMobileItem(i)&&i.status!=="del"&&i.status!=="done"&&i.start+i.dur>s0).sort((a,b)=>a.start-b.start)[0];
+    if(nxt&&overlap(nxt,blk)){
+      const busy=items.filter(i=>i.dur>0&&i.status!=="del"&&i.kind!=="placeholder"&&!i.key.startsWith("g-")&&i.key!==nxt.key).concat([blk]);
+      let at=null;for(let t=s0+60;t+nxt.dur<=21*60+30;t+=5){const c={start:t,dur:nxt.dur};if(!busy.some(b=>overlap(c,b))&&(nxt.kind!=="deep"||deepOkAt(cur,t,0))){at=t;break}}
+      if(at!=null)ops.push({t:"move",id:nxt.key,debut:hm(at)});else ops.push({t:"del",id:nxt.key});
+    }
+    ops.push({t:"task",titre:"Appeler un artisan",bloc:"domaine",sub:"Ajoutée pour le problème du jour"});
+    then=()=>{go("jour","signaler");setTimeout(()=>{const el=document.getElementById("is-new");if(el)el.focus()},400)};
+    return R();
+  }
+  if(sc.type==="pieds"){
+    ops.push({t:"dayset",douleur:7,seance:hasSalle(cur)?"Haut du corps (assis)":null,assis:true});
+    if(dowOf(cur)!==0){const bed=bedOf(cur),st=bed-30;if(st>n)ops.push({t:"add",debut:hm(st),duree:15,titre:"Soin des pieds (exceptionnel)",type:"soin",sub:"Jambes surélevées, avant le coucher"})}
+    reply=hasSalle(cur)?"Salle en haut du corps assis, ou repos complet si ça tire encore. Si la douleur ne baisse pas d'ici 1 à 2 semaines, consulte un médecin.":"Garde les pieds au repos aujourd'hui. Si la douleur ne baisse pas d'ici 1 à 2 semaines, consulte un médecin.";
+    return R();
+  }
+  if(sc.type==="echeance"){
+    const titre=(arg&&arg.titre||"").trim(),date=arg&&arg.date||"";
+    if(!titre||!/^\d{4}-\d{2}-\d{2}$/.test(date))return R();
+    const nd=dayDiff(cur,date),serre=nd<21;
+    ops.push({t:"deadline",titre,date,serre});
+    const tm=addDays(cur,1);
+    if(tm<date){
+      const d1=buildPlan(tm).items.find(i=>i.key==="p-deep1"&&i.status!=="del");
+      const st=Math.max(7*60,wakeOf(tm)+60);
+      if(d1&&overlap(d1,{start:st,dur:90}))ops.push({t:"del",jour:tm,id:d1.key});
+      ops.push({t:"add",jour:tm,debut:hm(st),duree:90,titre:"Travail profond · "+titre,type:"deep",sub:"Premier bloc du rétroplanning"});
+      if(serre){
+        const step=nd<=7?1:2;
+        for(let i=1+step,c=0;i<nd&&i<=13&&c<5;i+=step,c++){
+          const k=addDays(cur,i),slot=freeSlot(k,45,Math.max(8*60+30,wakeOf(k)+150),21*60+30,"deep");
+          if(slot!=null)ops.push({t:"add",jour:k,debut:hm(slot),duree:45,titre:"Travail profond · "+titre,type:"deep",sub:"Rétroplanning resserré"});
+        }
+      }
+    }
+    reply=serre?"Échéance dans "+nd+" jour"+(nd>1?"s":"")+" : rétroplanning resserré, phase INTENSIF dès 14 jours.":"Échéance dans "+nd+" jours : rythme normal, premier bloc demain.";
+    return R();
+  }
+  if(sc.type==="maison"){
+    const salle=items.find(i=>i.kind==="salle"&&i.status!=="del"&&i.start+i.dur>n);
+    if(!salle){reply="Pas de salle prévue aujourd'hui : rien à remplacer.";return R()}
+    ops.push({t:"del",id:salle.key});pre.push(0);
+    ops.push({t:"add",debut:hm(salle.start),duree:45,titre:"Séance maison · barre EZ",type:"autre",sub:"45 min à la maison"});
+    ops.push({t:"dayset",seance:"Maison"});
+    const use=arg&&arg.use||"deep",free0=salle.start+50,free1=Math.min(salle.start+salle.dur+(+S.settings.travelSalle||0),21*60+30);
+    const len=free1-free0;
+    if(use==="deep"&&len>=45&&deepOkAt(cur,free0,Math.min(len,90)))ops.push({t:"add",debut:hm(free0),duree:Math.min(len,90),titre:"Travail profond"+(deepTarget(cur)?" · "+deepTarget(cur).title:""),type:"deep",sub:"Temps gagné sur la salle"});
+    else if(use!=="none"&&len>=20)ops.push({t:"add",debut:hm(free0),duree:Math.min(len,45),titre:"Lecture perso",type:"lecture",sub:"Temps gagné sur la salle"});
+    if(use==="deep"&&!(len>=45&&deepOkAt(cur,free0,Math.min(len,90))))reply="Le travail profond ne tient pas dans ce créneau (règle des 21:30 ou plafond de 4 h) : lecture à la place.";
+    return R();
+  }
+  if(sc.type==="libre"){
+    const dur=Math.max(15,Math.min(240,+(arg&&arg.dur)||60)),s0=Math.ceil(n/5)*5;
+    const win={start:s0,dur};
+    items.filter(i=>!i.anchor&&!i.custom&&i.status!=="del"&&i.status!=="done"&&["deep","revision","pomodoro","fiche"].includes(i.kind)&&!i.key.startsWith("g-")&&overlap(i,win)).forEach(i=>ops.push({t:"del",id:i.key}));
+    const ci=(S.days[cur]||{}).checkin;
+    if(ci&&ci.color==="rouge"){ops.push({t:"add",debut:hm(s0),duree:Math.min(20,dur),titre:"Sieste de 20 min",type:"sieste",sub:"Forme rouge : récupérer d'abord"});reply="Forme rouge : sieste de 20 min d'abord."+(dur>=45?" Le reste du créneau reste libre.":"")}
+    else{
+      const dl=deepTarget(cur)||nearestDeadline(cur);
+      if(dur>=45&&deepOkAt(cur,s0,dur))ops.push({t:"add",debut:hm(s0),duree:dur,titre:"Travail profond"+(dl?" · "+dl.title:""),type:"deep",sub:dl?"Échéance la plus proche":"Ta tâche la plus exigeante"});
+      else ops.push({t:"add",debut:hm(s0),duree:dur,titre:(dur>=45?"Révision active":"Un Pomodoro")+(dl?" · "+dl.title:""),type:dur>=45?"revision":"pomodoro",sub:"Créneau libre"});
+    }
+    return R();
+  }
   if(sc.type==="voiture"){
     const salle=items.find(i=>i.kind==="salle"&&i.status!=="del"&&i.start+i.dur>n);
     if(salle){ops.push({t:"del",id:salle.key});ops.push({t:"add",debut:hm(salle.start),duree:45,titre:"Séance maison",type:"autre"});ops.push({t:"dayset",seance:"Maison"})}
@@ -1960,13 +2059,13 @@ function scenarioOps(sc,arg){
     items.filter(i=>i.kind==="deep"&&i.status!=="del"&&i.start>=e&&i.start<e+60).forEach(i=>{if(!seen.has(i.key)){seen.add(i.key);ops.push({t:"del",id:i.key})}});
     ops.push({t:"addanchor",debut:hm(s),fin:hm(e),titre:"Service en plus"});
   }
-  return {ops,pre};
+  return R();
 }
 function runScenario(sc,arg){
-  const {ops,pre}=scenarioOps(sc,arg);
-  if(!ops.length){toast("Rien à ajuster pour ce scénario aujourd'hui");return}
-  AS.scen=null;openPreview("Imprévu : "+sc.nom,"imprevu",ops,{preconf:pre});
-  go(view==="assistant"?"assistant":view,"apercu");
+  const r=scenarioOps(sc,arg),ops=r.ops,pre=r.pre;
+  if(!ops.length){toast(r.reply||(sc.type==="echeance"?"Donne un titre et une date":"Rien à ajuster pour ce scénario aujourd'hui"));return}
+  AS.scen=null;openPreview("Imprévu : "+sc.nom,"imprevu",ops,{preconf:pre,reply:r.reply||"",then:r.then||null});
+  go(view==="jke"?"jke":view,"apercu");
 }
 function scenariosHTML(){
   const sc=S.settings.scenarios.find(s=>s.id===AS.scen);
@@ -1976,6 +2075,14 @@ function scenariosHTML(){
     if(sc.type==="cours"){
       const cs=buildPlan(cur).items.filter(i=>i.kind==="cours"&&i.status!=="del"&&i.start+i.dur>nowMin());
       h+=cs.length?`<span class="flabel">Quel cours est annulé ?</span><div class="chips">${cs.map(c=>`<button class="chip" data-scencours="${esc(c.key)}">${hm(c.start)} · ${esc(c.title)}</button>`).join("")}</div>`:`<p class="small muted" style="margin:0">Plus aucun cours à venir aujourd'hui.</p>`;
+    }else if(sc.type==="deborde"){
+      h+=`<label class="flabel" for="db-fin">Fin du service ce soir<input type="time" id="db-fin" value="${esc(AS.debFin)}" style="max-width:160px"></label><button class="go" data-scengo="1" style="margin-left:0;align-self:flex-start">Préparer le plan B</button>`;
+    }else if(sc.type==="echeance"){
+      h+=`<label class="flabel" for="ec-t">Échéance<input type="text" id="ec-t" value="${esc(AS.ecTitre)}" placeholder="Ex. : dossier d'anglais"></label><label class="flabel" for="ec-d">Date<input type="date" id="ec-d" value="${esc(AS.ecDate)}"></label><button class="go" data-scengo="1" style="margin-left:0;align-self:flex-start">Créer et planifier</button>`;
+    }else if(sc.type==="maison"){
+      h+=`<span class="flabel">Le temps gagné sert à…</span><div class="chips">${[["deep","Travail profond"],["lecture","Lecture"],["none","Rien, je souffle"]].map(([v,l])=>`<button class="chip" data-scuse="${v}" aria-pressed="${AS.maisonUse===v}">${l}</button>`).join("")}</div><button class="go" data-scengo="1" style="margin-left:0;align-self:flex-start">Préparer le plan B</button>`;
+    }else if(sc.type==="libre"){
+      h+=`<span class="flabel">Durée du créneau, à partir de maintenant</span><div class="chips">${[30,45,60,90,120].map(v=>`<button class="chip" data-scdur="${v}" aria-pressed="${+AS.libreDur===v}">${durTxt(v)}</button>`).join("")}</div><button class="go" data-scengo="1" style="margin-left:0;align-self:flex-start">Remplir le créneau</button>`;
     }else if(sc.type==="service"){
       h+=`<div class="fxgrid"><label class="flabel" for="sv-s">Début<input type="time" id="sv-s" value="${esc(AS.svcS)}"></label><label class="flabel" for="sv-e">Fin<input type="time" id="sv-e" value="${esc(AS.svcE)}"></label></div><button class="go" data-scengo="1" style="margin-left:0;align-self:flex-start">Préparer le plan B</button>`;
     }
@@ -1984,15 +2091,15 @@ function scenariosHTML(){
 }
 function journalHTML(){
   const list=journal.slice().reverse().slice(0,8);
-  const src={assistant:"Assistant",imprevu:"Imprévu",checkin:"Check-in",rattrapage:"Rattrapage",agenda:"Agenda"};
-  return `<div class="card" id="journal"><h2>Journal</h2>${list.length?`<ul class="jl">${list.map(e=>{const d=new Date(e.at);return `<li><time>${pad(d.getHours())}:${pad(d.getMinutes())}</time><span>${esc(e.label)} <span class="badge">${src[e.src]||""}</span></span></li>`}).join("")}</ul><button class="mini" data-undo="1" style="align-self:flex-start;padding:0 16px">Annuler la dernière modification</button>`:`<p class="small muted" style="margin:0">Les changements faits par l'assistant, le check-in, les imprévus et l'agenda apparaîtront ici. Chacun peut être annulé.</p>`}</div>`;
+  const src={jke:"Jke",assistant:"Jke",imprevu:"Imprévu",checkin:"Check-in",rattrapage:"Rattrapage",agenda:"Agenda"};
+  return `<div class="card" id="journal"><h2>Journal</h2>${list.length?`<ul class="jl">${list.map(e=>{const d=new Date(e.at);return `<li><time>${pad(d.getHours())}:${pad(d.getMinutes())}</time><span>${esc(e.label)} <span class="badge">${src[e.src]||""}</span></span></li>`}).join("")}</ul><button class="mini" data-undo="1" style="align-self:flex-start;padding:0 16px">Annuler la dernière modification</button>`:`<p class="small muted" style="margin:0">Les changements faits par Jke, le check-in, les imprévus et l'agenda apparaîtront ici. Chacun peut être annulé.</p>`}</div>`;
 }
-const EXAMPLES=["Je suis crevé","Cours annulé","Décale ma révision","Ajoute une échéance"];
+const EXAMPLES=["Je suis crevé","Cours annulé","Décale ma révision","Ajoute une échéance","J'ai 1 h de libre"];
 function renderAssistant(){
   const ready=!STANDALONE&&sampleFn!==null&&!sampleOff;
-  let h=`<header class="top"><div><div class="eyebrow">Ton bras droit</div><h1>Assistant</h1></div>${gearBtn()}</header>`;
-  if(!ready&&sampleFn!==undefined)h+=`<div class="note"><div><b>Claude indisponible ici</b>${esc(sampleOffMsg())}</div></div>`;
-  h+=`<div class="card"><label class="flabel" for="as-input" style="font-size:16px">Qu'est-ce qui change ?</label><textarea id="as-input" rows="4" placeholder="Touche le micro du clavier et parle">${esc(AS.text)}</textarea><span class="small muted">Sur iPhone : touche le champ, puis le micro en bas du clavier. Tu peux aussi poser une question : « Quand je peux réviser Sarraute cette semaine ? »</span><div class="chips">${EXAMPLES.map(x=>`<button class="chip" data-asex="${esc(x)}">${esc(x)}</button>`).join("")}</div><div class="frow">${AS.busy?`<button class="go" disabled style="margin-left:0">Je réfléchis…</button><button class="mini" data-asstop="1" style="padding:0 14px">Arrêter</button>`:`<button class="go" data-asask="1" style="margin-left:0" ${ready||sampleFn===undefined?"":"disabled"}>Envoyer à l'assistant</button>`}</div>${AS.err?`<div class="note warn"><div>${esc(AS.err)}</div></div>`:""}${AS.answer?`<div class="answer"><span class="eyebrow">Réponse</span><p>${esc(AS.answer)}</p></div>`:""}</div>`;
+  let h=`<header class="top"><div><div class="eyebrow">Ton assistant</div><h1>Jke</h1></div>${gearBtn()}</header>`;
+  if(!ready&&sampleFn!==undefined)h+=`<div class="note"><div><b>Jke ne peut pas joindre Claude ici</b>${esc(sampleOffMsg())}</div></div>`;
+  h+=`<div class="card"><label class="flabel" for="as-input" style="font-size:16px">Qu'est-ce qui change ?</label><textarea id="as-input" rows="4" placeholder="Touche le micro du clavier et parle">${esc(AS.text)}</textarea><span class="small muted">Sur iPhone : touche le champ, puis le micro en bas du clavier. Tu peux aussi poser une question : « Quand je peux réviser Sarraute cette semaine ? »</span><div class="chips">${EXAMPLES.map(x=>`<button class="chip" data-asex="${esc(x)}">${esc(x)}</button>`).join("")}</div><div class="frow">${AS.busy?`<button class="go" disabled style="margin-left:0">Jke réfléchit…</button><button class="mini" data-asstop="1" style="padding:0 14px">Arrêter</button>`:`<button class="go" data-asask="1" style="margin-left:0" ${ready||sampleFn===undefined?"":"disabled"}>Parler à Jke</button>`}</div>${AS.err?`<div class="note warn"><div>${esc(AS.err)}</div></div>`:""}${AS.answer?`<div class="answer"><span class="eyebrow">Jke</span><p>${esc(AS.answer)}</p></div>`:""}</div>`;
   h+=previewHTML()+scenariosHTML()+journalHTML();
   return h;
 }
@@ -2081,7 +2188,7 @@ function debriefHTML(d){
 function render(){
   prioMemo={};
   if(pending)pending.res=evaluateOps(pending.ops,pending.confirmed);
-  const fn={jour:renderToday,agenda:renderAgenda,assistant:renderAssistant,semaine:renderWeek,bilan:renderBilan,plus:renderPlus,historique:renderHistory,reves:renderDreams,edt:renderEdt,inspirations:renderInsp,reglages:renderSettings}[view]||renderToday;
+  const fn={jour:renderToday,agenda:renderAgenda,jke:renderAssistant,semaine:renderWeek,bilan:renderBilan,plus:renderPlus,historique:renderHistory,reves:renderDreams,edt:renderEdt,inspirations:renderInsp,reglages:renderSettings}[view]||renderToday;
   document.getElementById("app").innerHTML=`<div class="view">${fn()}</div>`;
   renderTabs();
 }
@@ -2127,16 +2234,24 @@ document.addEventListener("click",e=>{
   if(ds.akrestore){const key=ds.akrestore;mutateDay(agDay,"Ancre rétablie",dd=>{delete dd.plan[key]});render();return}
   // assistant, aperçu, journal
   if(ds.asex){const box=document.getElementById("as-input");const v=ds.asex==="Ajoute une échéance"?"Ajoute une échéance : ":ds.asex;AS.text=v;if(box){box.value=v;box.focus()}
-    if(!sampleReady()&&sampleFn!==undefined){const m={"Je suis crevé":"crevee","Cours annulé":"cours"}[ds.asex];const sc=m&&S.settings.scenarios.find(x=>x.id===m);if(sc){if(sc.type==="cours"){AS.scen=sc.id;go("assistant","imprevus")}else runScenario(sc)}}
+    if(!sampleReady()&&sampleFn!==undefined){const m={"Je suis crevé":"crevee","Cours annulé":"cours","J'ai 1 h de libre":"libre","Ajoute une échéance":"echeance"}[ds.asex];const sc=m&&S.settings.scenarios.find(x=>x.id===m);if(sc){if(["cours","service","deborde","echeance","maison","libre"].includes(sc.type)){AS.scen=sc.id;if(sc.type==="libre")AS.libreDur=60;go("jke","imprevus")}else runScenario(sc)}}
     return}
   if(ds.asask){askAssistant();return}
   if(ds.asstop){if(AS.ctl)AS.ctl.abort();return}
   if(ds.prevapply){applyPending();return}
   if(ds.prevcancel){pending=null;render();toast("Aperçu annulé, rien n'a changé");return}
   if(ds.undo){undoLast();return}
-  if(ds.scen){const sc=S.settings.scenarios.find(x=>x.id===ds.scen);if(!sc)return;if(sc.type==="cours"||sc.type==="service"){AS.scen=AS.scen===sc.id?null:sc.id;render();return}runScenario(sc);return}
+  if(ds.scen){const sc=S.settings.scenarios.find(x=>x.id===ds.scen);if(!sc)return;if(["cours","service","deborde","echeance","maison","libre"].includes(sc.type)){AS.scen=AS.scen===sc.id?null:sc.id;render();return}runScenario(sc);return}
+  if(ds.scuse){AS.maisonUse=ds.scuse;render();return}
+  if(ds.scdur){AS.libreDur=+ds.scdur;render();return}
   if(ds.scencours){const sc=S.settings.scenarios.find(x=>x.type==="cours");if(sc)runScenario(sc,ds.scencours);return}
-  if(ds.scengo){const sc=S.settings.scenarios.find(x=>x.id===AS.scen);const a=document.getElementById("sv-s"),b=document.getElementById("sv-e");AS.svcS=a&&a.value||AS.svcS;AS.svcE=b&&b.value||AS.svcE;if(sc)runScenario(sc,{s:AS.svcS,e:AS.svcE});return}
+  if(ds.scengo){const sc=S.settings.scenarios.find(x=>x.id===AS.scen);if(!sc)return;const v=id=>{const e=document.getElementById(id);return e?e.value:""};
+    if(sc.type==="service"){AS.svcS=v("sv-s")||AS.svcS;AS.svcE=v("sv-e")||AS.svcE;runScenario(sc,{s:AS.svcS,e:AS.svcE})}
+    else if(sc.type==="deborde"){AS.debFin=v("db-fin")||AS.debFin;if(toMin(AS.debFin)<23*60&&toMin(AS.debFin)>=12*60){toast("Ce scénario sert pour une fin de service après 23:00");return}runScenario(sc,{fin:toMin(AS.debFin)<12*60?"23:55":AS.debFin})}
+    else if(sc.type==="echeance"){AS.ecTitre=v("ec-t");AS.ecDate=v("ec-d");if(!AS.ecTitre.trim()||!AS.ecDate){toast("Donne un titre et une date");return}if(AS.ecDate<=cur){toast("Choisis une date à venir");return}const t=AS.ecTitre,d=AS.ecDate;runScenario(sc,{titre:t,date:d});AS.ecTitre="";AS.ecDate=""}
+    else if(sc.type==="maison")runScenario(sc,{use:AS.maisonUse});
+    else if(sc.type==="libre")runScenario(sc,{dur:AS.libreDur});
+    return}
   // check-in, briefing
   if(ds.tocheckin){go("jour","checkin");return}
   if(ds.cien){const d=dayOf(cur);d.checkin=Object.assign({},d.checkin||{},{energy:+ds.cien});touchDay(cur);document.querySelectorAll("[data-cien]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.cien===ds.cien));return}
@@ -2250,14 +2365,16 @@ migrateIssues();
 view=routeFromHash();
 render();
 initRemote();
-getSample().then(()=>{if((view==="assistant"||view==="jour")&&!editing()&&!AS.busy)render()});
+getSample().then(()=>{if((view==="jke"||view==="jour")&&!editing()&&!AS.busy)render()});
 })();
 </script>
 
 <script>
 if("serviceWorker" in navigator){
   window.addEventListener("load",()=>{
-    navigator.serviceWorker.register("./sw.js").then(reg=>{
+    navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).then(reg=>{
+      reg.update().catch(()=>{});
+      document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")reg.update().catch(()=>{})});
       reg.addEventListener("updatefound",()=>{
         const w=reg.installing;if(!w)return;
         w.addEventListener("statechange",()=>{
